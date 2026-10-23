@@ -25,12 +25,19 @@ public static class ServiceCollectionExtensions
         return services.AddSingleton<IEventTransport, TTransport>();
     }
 
+    /// <summary>Names an event type in code, like <see cref="EventNameAttribute"/> (call before registering its handlers).</summary>
+    public static IServiceCollection AddMeshEventName<TEvent>(this IServiceCollection services, string name) where TEvent : notnull
+    {
+        EventBus.Name(typeof(TEvent), name);
+        return services;
+    }
+
     /// <summary>Registers a DI-resolved handler; a new scope is created per delivery.</summary>
     public static IServiceCollection AddMeshHandler<TEvent, THandler>(this IServiceCollection services)
         where TEvent : notnull where THandler : class, IEventHandler<TEvent>
     {
         services.TryAddScoped<THandler>();
-        services.AddSingleton(new HandlerRegistration(EventBus.NameOf(typeof(TEvent)), (sp, env, ctx, ct) =>
+        services.AddSingleton(new HandlerRegistration(EventBus.NameOf(typeof(TEvent)), typeof(THandler).FullName ?? typeof(THandler).Name, (sp, env, ctx, ct) =>
         {
             var evt = JsonSerializer.Deserialize<TEvent>(env.Payload, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
             return sp.GetRequiredService<THandler>().HandleAsync(evt, ctx, ct);
