@@ -30,13 +30,46 @@ internal sealed class EventBus : IEventBus, IEventReceiver
 
     public static string NameOf(Type t) => Names.GetOrAdd(t, static t => t.GetCustomAttribute<EventNameAttribute>()?.Name ?? t.FullName ?? t.Name);
 
-    public Task PublishAsync<TEvent>(TEvent @event, PublishOptions? options = null, CancellationToken cancellationToken = default) where TEvent : notnull
+    /// <summary>Gives a type its logical name in code (for event types the publisher does not own, so cannot mark with <see cref="EventNameAttribute"/>).</summary>
+    internal static void Name(Type t, string name)
     {
-        var envelope = new EventEnvelope(
-            Guid.NewGuid(), NameOf(typeof(TEvent)), JsonSerializer.SerializeToUtf8Bytes(@event, Json), _time.GetUtcNow(),
-            options?.CorrelationId, options?.TenantId, options?.Headers);
-        return _transport.PublishAsync(envelope, cancellationToken);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var existing = Names.GetOrAdd(t, name);
+        if (existing != name) throw new InvalidOperationException($"{t.FullName} is already named '{existing}'; it cannot also be '{name}'.");
     }
+
+    /// <summary>The envelope an event travels in (also used by the durable outbox).</summary>
+    internal EventEnvelope Envelope<TEvent>(TEvent @event, PublishOptions? options) where TEvent : notnull =>
+        new(Guid.NewGuid(), NameOf(typeof(TEvent)), JsonSerializer.SerializeToUtf8Bytes(@event, Json), _time.GetUtcNow(), options?.CorrelationId, options?.TenantId, options?.Headers);
+
+    /// <summary>The DI-registered handlers of an event (the durable ones: each is delivered and retried on its own).</summary>
+    internal IEnumerable<HandlerRegistration> HandlersOf(string eventName) => _diHandlers.Where(h => h.EventName == eventName);
+
+    /// <summary>Delivers to one DI handler in a fresh scope; its failure propagates, so a durable transport retries it.</summary>
+    internal async Task DeliverToHandlerAsync(string handlerKey, EventEnvelope envelope, CancellationToken cancellationToken)
+    {
+        var registration = _diHandlers.FirstOrDefault(h => h.Key == handlerKey && h.EventName == envelope.EventName)
+            ?? throw new InvalidOperationException($"No handler '{handlerKey}' for '{envelope.EventName}' is registered on this instance.");
+        await using var scope = _scopes.CreateAsyncScope();
+        await registration.Invoke(scope.ServiceProvider, envelope, ToContext(envelope), cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Runs the delegate subscriptions only (they live in this process; durable transports deliver the DI handlers).</summary>
+    internal async Task ReceiveSubscriptionsAsync(EventEnvelope envelope, CancellationToken cancellationToken)
+    {
+        var failures = new List<Exception>();
+        foreach (var sub in Volatile.Read(ref _subscriptions))
+        {
+            if (sub.EventName is not null && sub.EventName != envelope.EventName) continue;
+            await Guard(() => sub.Handler(envelope, cancellationToken), envelope, failures);
+        }
+
+        if (failures.Count > 0 && _options.FailureMode == HandlerFailureMode.Throw)
+            throw new AggregateException($"{failures.Count} handler(s) failed for '{envelope.EventName}'.", failures);
+    }
+
+    public Task PublishAsync<TEvent>(TEvent @event, PublishOptions? options = null, CancellationToken cancellationToken = default) where TEvent : notnull
+        => _transport.PublishAsync(Envelope(@event, options), cancellationToken);
 
     public IDisposable Subscribe<TEvent>(Func<TEvent, EventContext, CancellationToken, Task> handler) where TEvent : notnull
         => Add(new Subscription(NameOf(typeof(TEvent)), (env, ct) =>
@@ -105,5 +138,5 @@ internal sealed class EventBus : IEventBus, IEventReceiver
     }
 }
 
-/// <summary>A DI-registered <see cref="IEventHandler{TEvent}"/> bound to its event name.</summary>
-internal sealed record HandlerRegistration(string EventName, Func<IServiceProvider, EventEnvelope, EventContext, CancellationToken, Task> Invoke);
+/// <summary>A DI-registered <see cref="IEventHandler{TEvent}"/> bound to its event name; <see cref="Key"/> (the handler type) names it for durable delivery.</summary>
+internal sealed record HandlerRegistration(string EventName, string Key, Func<IServiceProvider, EventEnvelope, EventContext, CancellationToken, Task> Invoke);

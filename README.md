@@ -38,11 +38,23 @@ With the in-process transport, `PublishAsync` runs the handlers before it return
 
 A handler that throws is logged and does not affect the publisher or the other handlers (`FailureMode = Log`, the default). `FailureMode = Throw` runs every handler and then throws an `AggregateException`, which is useful in tests and with transports that redeliver.
 
+## Durable delivery on Relay
+
+`AddMeshRelay()` (with Relay's stores, `AddRelay` and its dispatcher) makes the DI handlers durable: a publish queues one Relay message
+per handler (destination `mesh:{handler type}`), so each handler is delivered, retried and dead-lettered on its own, and a failing one
+never runs the others again. Delegate subscriptions stay in-process and run at once.
+
+`IMeshOutbox.PublishAsync(connection, transaction, event)` queues the handlers inside the caller's transaction (the transactional
+outbox): nothing is delivered unless it commits. Messages go to `MeshRelayOptions.Table` on that connection's database. Delivery is
+at-least-once: de-duplicate by `EventContext.EventId`.
+
+`AddMeshEventName<T>("module.name")` names an event type in code, for types that cannot carry `[EventName]`.
+
 ## Running on several instances
 
 Implement `IEventTransport` (`Attach` and `PublishAsync`, calling `IEventReceiver.ReceiveAsync` for inbound events) and register it with `AddMeshTransport<T>()`. Durable transports are at-least-once and asynchronous, so use `EventContext.EventId` to de-duplicate.
 
-Only the in-process transport is included. A Postgres-outbox or broker transport is intended as a follow-up once a product runs several instances; the test suite proves pluggability with a simulated broker.
+The in-process transport and the durable Relay transport are included; Relay's Postgres stores let several instances share the work.
 
 ## Configuration
 
@@ -54,4 +66,4 @@ Section `Mesh`.
 
 ## Depends on
 
-Nothing else from this set of packages. Tenant and correlation ids are plain strings on `PublishOptions`.
+Relay (the durable transport and the transactional outbox). Tenant and correlation ids are plain strings on `PublishOptions`.
