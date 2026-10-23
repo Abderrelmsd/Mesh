@@ -138,5 +138,24 @@ internal sealed class EventBus : IEventBus, IEventReceiver
     }
 }
 
-/// <summary>A DI-registered <see cref="IEventHandler{TEvent}"/> bound to its event name; <see cref="Key"/> (the handler type) names it for durable delivery.</summary>
-internal sealed record HandlerRegistration(string EventName, string Key, Func<IServiceProvider, EventEnvelope, EventContext, CancellationToken, Task> Invoke);
+/// <summary>
+/// A DI-registered <see cref="IEventHandler{TEvent}"/>; <see cref="Key"/> names it for durable delivery. The event's name is read when
+/// events flow, not at registration, so a handler may be registered before the event type is named.
+/// </summary>
+internal sealed record HandlerRegistration(Type EventType, string Key, Func<IServiceProvider, EventEnvelope, EventContext, CancellationToken, Task> Invoke)
+{
+    public string EventName => EventBus.NameOf(EventType);
+}
+
+/// <summary>Names of handler types that stay the same from build to build (no assembly versions), for durable delivery.</summary>
+public static class HandlerKeys
+{
+    /// <summary><c>Namespace.Type</c>; a generic type lists its arguments the same way: <c>Ns.Adapter`2[Ns.Event,Ns.Handler]</c>.</summary>
+    public static string Of(Type type)
+    {
+        ArgumentNullException.ThrowIfNull(type);
+        if (!type.IsGenericType || type.IsGenericTypeDefinition) return type.FullName ?? type.Name;
+        var definition = type.GetGenericTypeDefinition();
+        return $"{definition.FullName ?? definition.Name}[{string.Join(",", type.GetGenericArguments().Select(Of))}]";
+    }
+}
