@@ -3,7 +3,7 @@
     <RepositoryUrl>https://github.com/Abderrelmsd/Mesh</RepositoryUrl>
     <PackageProjectUrl>https://github.com/Abderrelmsd/Mesh</PackageProjectUrl>
     <PackageId>Mesh</PackageId>
-    <Description>Internal pub/sub event bus with an in-process default, a durable per-handler transport on Relay with transactional publishing, and a pluggable transport (IEventBus).</Description>
+    <Description>Internal pub/sub event bus with an in-process default, a durable per-handler transport on Relay with transactional publishing, a Postgres LISTEN/NOTIFY broadcast transport, and a pluggable transport (IEventBus).</Description>
     <RootNamespace>Mesh</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
@@ -11,7 +11,7 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
     <PackageReference Include="Relay" Version="0.3.0" />
-
   </ItemGroup>
 </Project>

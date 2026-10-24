@@ -50,11 +50,24 @@ at-least-once: de-duplicate by `EventContext.EventId`.
 
 `AddMeshEventName<T>("module.name")` names an event type in code, for types that cannot carry `[EventName]`.
 
+## Broadcast on Postgres
+
+`AddMeshPostgresBroadcast(sp => dataSource)` makes every instance receive every event, the publisher included, over Postgres
+`LISTEN`/`NOTIFY`. It suits notifications every process must see, such as cache invalidation or a configuration change. A
+background listener holds one connection per instance and reconnects after failures.
+
+- Delivery is at-most-once: events sent while an instance is not listening are lost. On every (re)connect the listener delivers
+  `BroadcastResync` (`mesh.broadcast-resync`) to local subscribers, so a cache can drop everything it holds.
+- `PostgresBroadcastTransport.NotifyInTransactionAsync(connection, transaction, envelope)` notifies on the caller's transaction;
+  Postgres delivers it only if the transaction commits.
+- Payloads stay under 8000 bytes (a Postgres limit): broadcast that something changed, and let receivers load the data.
+- `Listening` completes once the first `LISTEN` is in place.
+
 ## Running on several instances
 
 Implement `IEventTransport` (`Attach` and `PublishAsync`, calling `IEventReceiver.ReceiveAsync` for inbound events) and register it with `AddMeshTransport<T>()`. Durable transports are at-least-once and asynchronous, so use `EventContext.EventId` to de-duplicate.
 
-The in-process transport and the durable Relay transport are included; Relay's Postgres stores let several instances share the work.
+The in-process, durable Relay and Postgres broadcast transports are included; Relay's Postgres stores let several instances share the work.
 
 ## Configuration
 
