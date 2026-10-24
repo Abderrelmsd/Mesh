@@ -32,12 +32,21 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>Registers a DI-resolved handler; a new scope is created per delivery.</summary>
+    /// <summary>Registers a DI-resolved handler; a new scope is created per delivery. Its durable key is <see cref="HandlerKeys.Of"/> its type.</summary>
     public static IServiceCollection AddMeshHandler<TEvent, THandler>(this IServiceCollection services)
         where TEvent : notnull where THandler : class, IEventHandler<TEvent>
+        => services.AddMeshHandler<TEvent, THandler>(HandlerKeys.Of(typeof(THandler)));
+
+    /// <summary>
+    /// Registers a DI-resolved handler under an explicit durable key (messages already queued for a key keep finding the handler when
+    /// its type is renamed or moved). Keys are unique per event.
+    /// </summary>
+    public static IServiceCollection AddMeshHandler<TEvent, THandler>(this IServiceCollection services, string key)
+        where TEvent : notnull where THandler : class, IEventHandler<TEvent>
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
         services.TryAddScoped<THandler>();
-        services.AddSingleton(new HandlerRegistration(EventBus.NameOf(typeof(TEvent)), typeof(THandler).FullName ?? typeof(THandler).Name, (sp, env, ctx, ct) =>
+        services.AddSingleton(new HandlerRegistration(typeof(TEvent), key, (sp, env, ctx, ct) =>
         {
             var evt = JsonSerializer.Deserialize<TEvent>(env.Payload, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
             return sp.GetRequiredService<THandler>().HandleAsync(evt, ctx, ct);
